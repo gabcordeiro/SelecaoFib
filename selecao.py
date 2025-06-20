@@ -1,13 +1,12 @@
-"""
-Processo Seletivo SEFAZ-ES - Solução Avançada
-Autor: Seu Nome
-"""
 import sqlite3
 import argparse
 import logging
 from typing import List, Tuple
 from datetime import datetime
-from fpdf import FPDF  # Requer instalação: pip install fpdf
+import matplotlib.pyplot as plt
+from fpdf import FPDF
+import numpy as np
+from io import BytesIO
 
 # Configuração de logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -107,75 +106,160 @@ class DatabaseManager:
             logging.info(f"Números acima de {threshold} removidos")
         except sqlite3.Error as e:
             logging.error(f"Erro ao deletar registros: {e}")
+            
+    def get_stats(self):
+        """Obtém estatísticas completas do banco de dados"""
+        stats = {}
+        
+        # Total de números
+        stats['total'] = self.execute_query("SELECT COUNT(*) FROM SELECAO_TESTE")[0][0]
+        
+        # Contagem par/ímpar
+        count_result = self.execute_query(
+            "SELECT SUM(NUM_PAR), SUM(NUM_IMPAR) FROM SELECAO_TESTE"
+        )[0]
+        stats['pares'] = count_result[0] or 0
+        stats['impares'] = count_result[1] or 0
+        
+        # Sequência Fibonacci completa
+        stats['sequencia'] = [row[0] for row in self.execute_query(
+            "SELECT NUM_FIBONACCI FROM SELECAO_TESTE ORDER BY NUM_FIBONACCI"
+        )]
+        
+        # Top 5 maiores
+        stats['top5'] = [row[0] for row in self.execute_query(
+            "SELECT NUM_FIBONACCI FROM SELECAO_TESTE ORDER BY NUM_FIBONACCI DESC LIMIT 5"
+        )]
+        
+        # Dados do candidato
+        stats['candidato'] = self.execute_query(
+            "SELECT NME_CANDIDATO, DAT_INSCRICAO FROM SELECAO_CANDIDATO LIMIT 1"
+        )[0]
+        
+        return stats
 
-    def generate_report(self, filename: str = "relatorio.pdf"):
-        """Gera relatório PDF com resultados das consultas"""
-        try:
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_auto_page_break(auto=True, margin=15)
-            pdf.set_font("helvetica", size=12)
-            
-            # ---- CABEÇALHO ----
-            pdf.set_font_size(16)
-            pdf.set_font(style='B')
-            pdf.set_fill_color(240, 240, 240)
-            pdf.cell(0, 10, "Relatório do Processo Seletivo - SEFAZ/ES", 
-                    new_x="LMARGIN", new_y="NEXT", align='C', fill=True)
-            pdf.ln(10)
-            
-            # ---- INFORMAÇÕES BÁSICAS ----
-            candidate = self.execute_query("SELECT NME_CANDIDATO, DAT_INSCRICAO FROM SELECAO_CANDIDATO LIMIT 1")[0]
-            
-            # ---- SEQUÊNCIA FIBONACCI (DISTINCT) ----
-            pdf.set_font_size(12)
-            pdf.set_font(style='B')
-            pdf.cell(0, 10, "Sequência Fibonacci Única Gerada:", new_x="LMARGIN", new_y="NEXT")
-            pdf.set_font(style='')
-            pdf.set_font_size(10)
-            
-            # MODIFICAÇÃO CRÍTICA AQUI - Adicionado DISTINCT e ORDER BY
-            fib_data = self.execute_query("SELECT DISTINCT NUM_FIBONACCI FROM SELECAO_TESTE ORDER BY NUM_FIBONACCI")
-            fib_str = ', '.join(str(row[0]) for row in fib_data)
-            
-            pdf.set_draw_color(200, 200, 200)
-            pdf.set_fill_color(245, 245, 245)
-            pdf.multi_cell(0, 7, fib_str, border=1, fill=True)
-            pdf.ln(10)
-            
-            # ---- TOP 5 NÚMEROS (DISTINCT) ----
-            pdf.set_font_size(12)
-            pdf.set_font(style='B')
-            pdf.cell(0, 10, "Top 5 Maiores Números Únicos:", new_x="LMARGIN", new_y="NEXT")
-            pdf.set_font(style='')
-            pdf.set_font_size(10)
-            
-            # MODIFICAÇÃO CRÍTICA AQUI - Adicionado DISTINCT
-            top5 = self.execute_query("SELECT DISTINCT NUM_FIBONACCI FROM SELECAO_TESTE ORDER BY NUM_FIBONACCI DESC LIMIT 5")
-            
-            # Tabela estilizada
-            pdf.set_draw_color(150, 150, 150)
-            pdf.set_fill_color(220, 220, 220)
-            pdf.cell(40, 8, "Posição", border=1, fill=True, align='C', new_x="RIGHT", new_y="TOP")
-            pdf.cell(40, 8, "Valor", border=1, fill=True, align='C', new_x="LMARGIN", new_y="NEXT")
-            
-            for i, row in enumerate(top5, 1):
-                pdf.cell(40, 8, str(i), border=1, align='C', new_x="RIGHT", new_y="TOP")
-                pdf.cell(40, 8, str(row[0]), border=1, align='C', new_x="LMARGIN", new_y="NEXT")
-            
-            pdf.ln(10)
-            
-            # ---- [Restante do código permanece igual] ----
-            
-            pdf.output(filename)
-            logging.info(f"Relatório gerado: {filename}")
-            return True
-            
-        except Exception as e:
-            logging.error(f"Erro ao gerar relatório: {e}")
-            return False
+def generate_report(stats: dict, filename: str = "relatorio.pdf"):
+    """Gera relatório PDF com gráficos profissionais"""
+    try:
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.set_font("helvetica", size=12)
+        
+        # ---- CABEÇALHO ----
+        pdf.set_font_size(14)
+        pdf.set_font(style='B')
+        pdf.set_fill_color(53, 85, 107)  # Azul profissional
+        pdf.set_text_color(255, 255, 255)  # Texto branco
+        pdf.cell(0, 15, "Relatório do Processo Seletivo - SEFAZ/ES", 
+                new_x="LMARGIN", new_y="NEXT", align='C', fill=True)
+        pdf.ln(10)
+        
+        # Resetar cor do texto
+        pdf.set_text_color(0, 0, 0)
+        
+        # ---- INFORMAÇÕES BÁSICAS ----
+        pdf.set_font_size(10)
+        pdf.set_font(style='B')
+        pdf.cell(0, 10, f"Nome do Candidato: {stats['candidato'][0]}", new_x="LMARGIN", new_y="NEXT")
 
-# Faz o processo completo, chama métodos de criação das tabelas e criação do fibonacci
+        
+        # ---- SEQUÊNCIA FIBONACCI ----
+        pdf.set_font_size(10)
+        pdf.set_font(style='B')
+        # CORREÇÃO: Removido o parêntese extra
+        pdf.cell(0, 10, f"Sequência Fibonacci ({len(stats['sequencia'])} números):", 
+                new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font(style='')
+        pdf.set_font_size(10)
+        
+        # Formatando a sequência para caber no PDF
+        fib_str = ', '.join(map(str, stats['sequencia']))
+        if len(fib_str) > 150:  # Se for muito longo, truncar
+            fib_str = fib_str[:150] + '...'
+        
+        pdf.set_draw_color(200, 200, 200)
+        pdf.set_fill_color(245, 245, 245)
+        pdf.multi_cell(0, 7, fib_str, border=1, fill=True)
+        pdf.ln(10)
+        
+        # ---- TOP 5 MAIORES NÚMEROS ----
+        pdf.set_font_size(10)
+        pdf.set_font(style='B')
+        pdf.cell(0, 10, "Top 5 Maiores Números:", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font(style='')
+        pdf.set_font_size(8)
+        
+        # Tabela estilizada
+        pdf.set_draw_color(150, 150, 150)
+        pdf.set_fill_color(220, 220, 220)
+        pdf.cell(40, 8, "Posição", border=1, fill=True, align='C', new_x="RIGHT", new_y="TOP")
+        pdf.cell(40, 8, "Valor", border=1, fill=True, align='C', new_x="LMARGIN", new_y="NEXT")
+        
+        for i, num in enumerate(stats['top5'], 1):
+            pdf.cell(40, 8, str(i), border=1, align='C', new_x="RIGHT", new_y="TOP")
+            pdf.cell(40, 8, str(num), border=1, align='C', new_x="LMARGIN", new_y="NEXT")
+        
+        pdf.ln(10)
+        
+        # ---- ESTATÍSTICAS E GRÁFICOS ----
+        pdf.set_font_size(10)
+        pdf.set_font(style='B')
+        pdf.cell(0, 10, "Estatísticas:", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font(style='')
+        pdf.set_font_size(10)
+        
+        # Dados para gráfico
+        labels = ['Pares', 'Ímpares']
+        sizes = [stats['pares'], stats['impares']]
+        colors = ['#66c2a5', '#fc8d62']
+        
+        # Criar gráfico de pizza
+        plt.figure(figsize=(6, 4))
+        plt.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', 
+               shadow=True, startangle=90)
+        plt.axis('equal')  # Gráfico circular
+        plt.title('Distribuição Par/Ímpar')
+        
+        # Salvar gráfico em buffer
+        img_buffer = BytesIO()
+        plt.savefig(img_buffer, format='png', dpi=150)
+        img_buffer.seek(0)
+        
+        # Inserir gráfico no PDF
+        pdf.ln(5)
+        pdf.cell(0, 10, "Distribuição de Números:", new_x="LMARGIN", new_y="NEXT")
+        pdf.image(img_buffer, x=50, w=100)
+        pdf.ln(5)
+        
+        # Fechar figura para liberar memória
+        plt.close()
+        
+        # Estatísticas textuais
+        pdf.set_font_size(8)
+        pdf.cell(0, 4, f"Total de Números: {stats['total']}", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 4, f"Pares: {stats['pares']} ({stats['pares']/stats['total']*100:.1f}%)", 
+               new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 4, f"Ímpares: {stats['impares']} ({stats['impares']/stats['total']*100:.1f}%)", 
+               new_x="LMARGIN", new_y="NEXT")
+        
+        # ---- RODAPÉ ----
+        pdf.ln(15)
+        pdf.set_font_size(8)
+        pdf.set_font(style='I')
+        pdf.cell(0, 5, f"Relatório gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", 
+                new_x="LMARGIN", new_y="NEXT", align='C')
+        pdf.cell(0, 5, "Processo Seletivo SEFAZ/ES - Todos os direitos reservados", 
+                new_x="LMARGIN", new_y="NEXT", align='C')
+        
+        pdf.output(filename)
+        logging.info(f"Relatório gerado: {filename}")
+        return True
+        
+    except Exception as e:
+        logging.error(f"Erro ao gerar relatório: {e}")
+        return False
+    
 def run_full_process(candidate_name: str):
     """Executa fluxo completo do processo seletivo"""
     db = DatabaseManager()
@@ -190,26 +274,32 @@ def run_full_process(candidate_name: str):
     fib_sequence = db.generate_fibonacci()
     db.insert_tests(candidate_id, fib_sequence)
     
-    # Executa consultas obrigatórias
-    queries = [
-        ("Sequência Fibonacci", "SELECT NUM_FIBONACCI FROM SELECAO_TESTE"),
-        ("Top 5 Maiores", "SELECT NUM_FIBONACCI FROM SELECAO_TESTE ORDER BY NUM_FIBONACCI DESC LIMIT 5"),
-        ("Contagem Par/Ímpar", """
-        SELECT 
-            SUM(NUM_PAR) AS Pares,
-            SUM(NUM_IMPAR) AS Impares 
-        FROM SELECAO_TESTE""")
-    ]
+    # Obter estatísticas ANTES da deleção
+    stats_before = db.get_stats()
     
-    for title, query in queries:
-        print(f"\n{title}:")
-        results = db.execute_query(query)
-        for row in results:
-            print(row)
+    # Executar consultas obrigatórias
+    print("\nSequência Fibonacci:")
+    for row in stats_before['sequencia']:
+        print(row)
     
+    print("\nTop 5 Maiores:")
+    for num in stats_before['top5']:
+        print(num)
+    
+    print("\nContagem Par/Ímpar:")
+    print(f"Pares: {stats_before['pares']}, Ímpares: {stats_before['impares']}")
+    
+    # Deletar números grandes
     db.delete_large_numbers(5000)
-    db.generate_report()
+    
+    # Obter estatísticas APÓS deleção
+    stats_after = db.get_stats()
+    
+    # Gerar relatório com estatísticas ANTES da deleção
+    generate_report(stats_before)
+    
     logging.info("Processo concluído com sucesso!")
+    print(f"\nRelatório gerado: relatorio.pdf")
 
 def test_fibonacci_generation():
     """Teste unitário para geração de Fibonacci"""
@@ -219,7 +309,7 @@ def test_fibonacci_generation():
     print("✅ Teste de Fibonacci aprovado!")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Processo Seletivo SEFAZ-ES")
+    parser = argparse.ArgumentParser(description="Processo Seletivo SEFAZ/ES")
     parser.add_argument('--nome', help="Nome do candidato fictício")
     parser.add_argument('--testar', action='store_true', help="Executar testes unitários")
     
