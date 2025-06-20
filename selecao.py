@@ -86,6 +86,43 @@ class DatabaseManager:
         except sqlite3.Error as e:
             logging.error(f"Erro ao inserir testes: {e}")
 
+
+    #Função para validação das constraints     
+    def validate_constraints(self):
+        """Valida as constraints do banco de dados e retorna dicionário padronizado"""
+        try:
+            results = {
+                'invalid_par': self.execute_query(
+                    "SELECT COUNT(*) FROM SELECAO_TESTE WHERE NUM_PAR NOT IN (0, 1)"
+                )[0][0],
+                'invalid_impar': self.execute_query(
+                    "SELECT COUNT(*) FROM SELECAO_TESTE WHERE NUM_IMPAR NOT IN (0, 1)"
+                )[0][0],
+                'inconsistent_parity': self.execute_query(
+                    "SELECT COUNT(*) FROM SELECAO_TESTE WHERE NUM_PAR = NUM_IMPAR"
+                )[0][0],
+                'null_values': self.execute_query(
+                    "SELECT COUNT(*) FROM SELECAO_TESTE WHERE NUM_FIBONACCI IS NULL"
+                )[0][0]
+            }
+            
+            if any(results.values()):
+                logging.warning(f"Problemas nas constraints: {results}")
+            else:
+                logging.info("Todas as constraints validadas com sucesso!")
+            
+            return results
+            
+        except Exception as e:
+            logging.error(f"Erro durante validação: {e}")
+            return {
+                'invalid_par': -1,
+                'invalid_impar': -1,
+                'inconsistent_parity': -1,
+                'null_values': -1
+            }
+    
+
     def execute_query(self, query: str) -> List[Tuple]:
         """Executa consulta SQL e retorna resultados"""
         try:
@@ -140,7 +177,16 @@ class DatabaseManager:
 
 def generate_report(stats: dict, filename: str = "relatorio.pdf"):
     """Gera relatório PDF com gráficos profissionais"""
+ 
+
     try:
+                # Validação inicial (modificada)
+        db = DatabaseManager()
+        constraints = db.validate_constraints()
+        
+        if constraints['inconsistent_parity'] > 0:  # Note a chave atualizada
+            logging.warning(f"Dados inconsistentes encontrados: {constraints['inconsistent_parity']} registros")
+
         pdf = FPDF()
         pdf.add_page()
         pdf.set_auto_page_break(auto=True, margin=15)
@@ -214,6 +260,24 @@ def generate_report(stats: dict, filename: str = "relatorio.pdf"):
         sizes = [stats['pares'], stats['impares']]
         colors = ['#66c2a5', '#fc8d62']
         
+        # Substitua o código do gráfico por:
+        plt.figure(figsize=(8,4))
+        bars = plt.bar(['Pares', 'Ímpares'], 
+                    [stats['pares'], stats['impares']], 
+                    color=['#4e79a7', '#f28e2b'])
+
+        plt.title('Distribuição Par/Ímpar na Sequência Fibonacci', pad=20)
+        plt.ylabel('Quantidade')
+
+        # Adiciona valores nas barras
+        for bar in bars:
+            height = bar.get_height()
+            plt.text(bar.get_x() + bar.get_width()/2., height,
+                    f'{int(height)} ({height/stats["total"]*100:.1f}%)',
+                    ha='center', va='bottom')
+
+        plt.tight_layout()
+
         # Criar gráfico de pizza
         plt.figure(figsize=(6, 4))
         plt.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', 
@@ -243,6 +307,20 @@ def generate_report(stats: dict, filename: str = "relatorio.pdf"):
         pdf.cell(0, 4, f"Ímpares: {stats['impares']} ({stats['impares']/stats['total']*100:.1f}%)", 
                new_x="LMARGIN", new_y="NEXT")
         
+        # análise matemática
+        pdf.ln(10)
+        pdf.set_font(style='B')
+        pdf.cell(0, 10, "Análise Matemática:", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font(style='')
+
+        ratio = stats['impares']/stats['pares']
+        pdf.cell(0, 6, f"Proporção Ímpares/Pares: {ratio:.2f} (esperado ~2.618 para Fibonacci)", new_x="LMARGIN", new_y="NEXT")
+
+        if abs(ratio - 2.618) < 0.1:
+            pdf.cell(0, 6, "✓ Proporção dentro do esperado", new_x="LMARGIN", new_y="NEXT")
+        else:
+            pdf.cell(0, 6, "* Proporção fora do padrão Fibonacci", new_x="LMARGIN", new_y="NEXT")
+
         # ---- RODAPÉ ----
         pdf.ln(15)
         pdf.set_font_size(8)
@@ -260,10 +338,20 @@ def generate_report(stats: dict, filename: str = "relatorio.pdf"):
         logging.error(f"Erro ao gerar relatório: {e}")
         return False
     
+
+
+#Função que executa todo o processo    
 def run_full_process(candidate_name: str):
     """Executa fluxo completo do processo seletivo"""
     db = DatabaseManager()
     
+      # Validação após inserção (atualizada)
+    constraints = db.validate_constraints()
+    if constraints['inconsistent_parity'] > 0:  # Chave atualizada aqui
+        logging.error(f"Problema de consistência encontrado: {constraints}")
+    else:
+        logging.info("Dados consistentes!")
+
     if not db.create_tables():
         return
     
@@ -276,7 +364,17 @@ def run_full_process(candidate_name: str):
     
     # Obter estatísticas ANTES da deleção
     stats_before = db.get_stats()
+
+    # VALIDAÇÃO CRÍTICA (novo código)
+    constraints = db.validate_constraints()
+    if any(constraints.values()):
+        logging.error(f"Problemas nas constraints: {constraints}")
+    else:
+        logging.info("Todas as constraints validadas com sucesso!")
     
+    # 
+
+
     # Executar consultas obrigatórias
     print("\nSequência Fibonacci:")
     for row in stats_before['sequencia']:
@@ -323,3 +421,6 @@ if __name__ == "__main__":
         print("Modo de uso:")
         print("  --nome 'Nome Candidato' : Executa o processo completo")
         print("  --testar : Executa testes unitários")
+
+
+
