@@ -68,6 +68,6 @@ A solução não apenas cumpre todos os requisitos obrigatórios, como também i
 ### 🔧 Instalação
 
 ```bash
-git clone [URL_DO_SEU_REPOSITORIO]
-cd [NOME_DO_DIRETORIO]
+git clone https://github.com/gabcordeiro/SelecaoFib
+cd SelecaoFib
 pip install -r requirements.txt
