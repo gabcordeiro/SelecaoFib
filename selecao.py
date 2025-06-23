@@ -14,6 +14,7 @@ FEATURES PRINCIPAIS:
 6. Exportação de dados para JSON
 7. Sistema de logs detalhado
 8. Testes unitários integrados
+9. Métrica para o tempo de execução
 
 ========================================================================
 COMO USAR:
@@ -45,6 +46,7 @@ import matplotlib.pyplot as plt
 from fpdf import FPDF
 from io import BytesIO
 import json
+import time
 
 logging.basicConfig(
     # Define o nível mínimo de logs que será registrado (INFO inclui INFO, WARNING, ERROR, CRITICAL)
@@ -209,7 +211,7 @@ class DatabaseManager:
             # 2. DEBUG INICIAL
             # LOGS DETALHADOS PARA MONITORAMENTO DO PROCESSO
             print(f"\n[DEBUG] Iniciando inserção de testes para candidato ID: {candidate_id}")
-            print(f"[DEBUG] Tamanho da sequência: {len(fib_sequence)} números")
+            logging.debug(f" Tamanho da sequência: {len(fib_sequence)} números")
             
             # 3. PROCESSAMENTO DA SEQUÊNCIA
             for i, num in enumerate(fib_sequence):
@@ -219,7 +221,7 @@ class DatabaseManager:
                 is_odd = 1 - is_even
                 
                 # 3.2. DEBUG DOS VALORES (OPCIONAL)
-                print(f"[DEBUG] Inserindo #{i+1}: Fib={num} | Par={is_even} | Ímpar={is_odd}")
+                logging.debug(f" Inserindo #{i+1}: Fib={num} | Par={is_even} | Ímpar={is_odd}")
                 
                 # 4. EXECUÇÃO DA QUERY
                 self.cursor.execute(
@@ -236,7 +238,7 @@ class DatabaseManager:
             
             # 6. FINALIZAÇÃO
             self.conn.commit()
-            print(f"[DEBUG] Commit realizado! {len(fib_sequence)} registros inseridos.")
+            logging.debug(f" Commit realizado! {len(fib_sequence)} registros inseridos.")
             logging.info(f"{len(fib_sequence)} testes inseridos")
         
         except sqlite3.Error as e:
@@ -451,7 +453,7 @@ def create_bar_chart(labels: List[str], values: List[int], colors: List[str], to
         - Exporta para buffer de memória
     """
     # 1. CONFIGURAÇÃO INICIAL
-    plt.figure(figsize=(8, 4))
+    plt.figure(figsize=(6, 2))
     
     # 2. CRIAÇÃO DAS BARRAS
     bars = plt.bar(labels, values, color=colors)
@@ -496,7 +498,7 @@ def create_pie_chart(labels: List[str], sizes: List[int], colors: List[str]) -> 
         - Exporta para buffer de memória
     """
     # 1. CONFIGURAÇÃO DO GRÁFICO
-    plt.figure(figsize=(4, 4))  # Tamanho quadrado para gráfico circular
+    plt.figure(figsize=(3, 3))  # Tamanho quadrado para gráfico circular
     
     # 2. CRIAÇÃO DAS FATIAS
     plt.pie(
@@ -525,7 +527,7 @@ def create_pie_chart(labels: List[str], sizes: List[int], colors: List[str]) -> 
     
     return img_buffer
 
-def generate_report(stats: dict, filename: str = "relatorio.pdf", expected_ratio: float = 1.618, tolerancia: float = 0.5):
+def generate_report(stats: dict, execution_time: float, filename: str = "relatorio.pdf", expected_ratio: float = 1.618, tolerancia: float = 0.5):
     """Gera um relatório PDF com os resultados da análise da sequência Fibonacci.
     
     Args:
@@ -629,16 +631,25 @@ def generate_report(stats: dict, filename: str = "relatorio.pdf", expected_ratio
             pdf.cell(0, 6, "Proporção fora do padrão Fibonacci esperado", new_x="LMARGIN", new_y="NEXT")
         pdf.set_text_color(0, 0, 0)
 
-        # Rodapé
+         # Rodapé
         pdf.ln(15)
         pdf.set_font_size(8)
         pdf.set_font(style='I')
         pdf.cell(0, 5, f"Relatório gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
-                new_x="LMARGIN", new_y="NEXT", align='C')
+                 new_x="LMARGIN", new_y="NEXT", align='C')
+        
+        # --- Medição do tempo ---
+        pdf.cell(0, 5, f"Tempo de execução do processo: {execution_time:.4f} segundos",
+                 new_x="LMARGIN", new_y="NEXT", align='C')
+
         pdf.cell(0, 5, "Secretaria da Fazenda do Espírito Santo - Processo Seletivo",
-                new_x="LMARGIN", new_y="NEXT", align='C')
+                 new_x="LMARGIN", new_y="NEXT", align='C')
         pdf.cell(0, 5, "Todos os direitos reservados © 2025",
-                new_x="LMARGIN", new_y="NEXT", align='C')
+                 new_x="LMARGIN", new_y="NEXT", align='C')
+
+        pdf.output(filename)
+        logging.info(f"Relatório gerado: {filename}")
+        return True
 
         pdf.output(filename)
         logging.info(f"Relatório gerado: {filename}")
@@ -668,75 +679,108 @@ def export_stats_to_json(stats: Dict[str, Any], filename: str = "dados.json"):
         return False
 
 def run_full_process(candidate_name: str,
-                   expected_ratio: float = 1.618,
-                   tolerancia: float = 0.5,
-                   export_json: bool = False):
-    """Executa todo o processo seletivo, desde a criação do banco até a geração de relatórios.
+                     expected_ratio: float = 1.618,
+                     tolerancia: float = 0.5,
+                     export_json: bool = False):
+    """
+    Executa o fluxo completo do processo seletivo: cria o banco, insere dados,
+    executa consultas, deleta registros e gera relatórios, medindo o tempo total.
     
     Args:
-        candidate_name (str): Nome do candidato a ser registrado
-        expected_ratio (float): Valor esperado da proporção áurea (padrão: 1.618)
-        tolerancia (float): Margem aceitável para validação (padrão: 0.5)
-        export_json (bool): Se True, exporta os dados para JSON (padrão: False)
+        candidate_name (str): Nome do candidato a ser registrado.
+        expected_ratio (float): Valor esperado da proporção áurea (padrão: 1.618).
+        tolerancia (float): Margem aceitável para validação (padrão: 0.5).
+        export_json (bool): Se True, exporta os dados para JSON (padrão: False).
     """
-    
+    # 1. INICIALIZAÇÃO E MEDIÇÃO DE TEMPO
+    start_time = time.perf_counter()
+    logging.info("=" * 50)
+    logging.info(f"INICIANDO PROCESSO SELETIVO PARA: {candidate_name}")
+    logging.info("=" * 50)
+
     try:
-        # 1. INICIALIZAÇÃO
-        logging.info("Iniciando processo seletivo")
-        db = DatabaseManager()  # Conecta ao banco de dados
+        db = DatabaseManager()
 
-        # 2. PREPARAÇÃO DO BANCO
-        if not db.create_tables():  # Cria tabelas necessárias
-            logging.error("Falha na criação das tabelas. Abortando.")
+        # 2. PREPARAÇÃO DO BANCO DE DADOS E INSERÇÃO
+        if not db.create_tables():
+            logging.error("Processo abortado devido a falha na criação das tabelas.")
             return
 
-        # 3. CADASTRO DO CANDIDATO
         candidate_id = db.insert_candidate(candidate_name)
-        if candidate_id == -1:  # Verifica se inseriu corretamente
-            logging.error("Falha ao inserir candidato. Abortando.")
+        if candidate_id == -1:
+            logging.error("Processo abortado devido a falha ao inserir candidato.")
             return
 
-        # 4. GERAR E INSERIR FIBONACCI
-        fib_sequence = db.generate_fibonacci()  # Gera sequência (30 números)
-        db.insert_tests(candidate_id, fib_sequence)  # Armazena no banco
+        fib_sequence = db.generate_fibonacci(30) # Gera os 30 números pedidos
+        db.insert_tests(candidate_id, fib_sequence)
 
-        # 5. VALIDAÇÃO
-        constraints = db.validate_constraints()  # Checa restrições do banco
-        if any(constraints.values()):  # Se houver problemas
-            logging.error("Problemas encontrados nas constraints dos dados")
-        else:
-            logging.info("Dados validados com sucesso")
+        # Validação de consistência (boa prática do seu código original)
+        db.validate_constraints()
 
-        # 6. COLETA DE ESTATÍSTICAS
-        stats_before = db.get_stats(candidate_id)  # Busca dados para relatório
+        # 3. CONSULTAS SQL (ANTES DA EXCLUSÃO)
+        logging.info("Executando consultas SQL obrigatórias (antes da exclusão)...")
+        stats_before = db.get_stats(candidate_id)
+        
+        print("\n" + "-"*20 + " RESULTADOS ANTES DA EXCLUSÃO " + "-"*20)
+        # a) Listar a sequência Fibonacci
+        print("\n[CONSULTA 1] Sequência Fibonacci completa:")
+        print(', '.join(map(str, stats_before['sequencia'])))
+        
+        # b) Listar os 5 maiores números
+        print("\n[CONSULTA 2] 5 maiores números da sequência:")
+        print(', '.join(map(str, stats_before['top5'])))
 
-        # 7. EXIBIÇÃO NO CONSOLE (CONSULTAS OBRIGATÓRIAS)
-        print("\n[CONSULTAS OBRIGATÓRIAS]")
-        print("Sequência Fibonacci completa:")
-        print(", ".join(map(str, stats_before['sequencia'])))
-        print("\nTop 5 maiores números:")
-        for i, num in enumerate(stats_before['top5'], 1):
-            print(f"{i}. {num}")
-        print(f"\nContagem Par/Ímpar: Pares: {stats_before['pares']}, Ímpares: {stats_before['impares']}")
+        # c) Contar pares e ímpares
+        print("\n[CONSULTA 3] Contagem de números pares e ímpares:")
+        print(f"   - Pares: {stats_before['pares']}")
+        print(f"   - Ímpares: {stats_before['impares']}")
+        print("-" * 64 + "\n")
 
-        # 8. LIMPEZA (remove números > 5000)
-        db.delete_large_numbers(5000)
+        # 4. OPERAÇÃO DE EXCLUSÃO
+        delete_threshold = 5000
+        logging.info(f"[OPERAÇÃO] Deletando todos os números maiores que {delete_threshold}...")
+        db.delete_large_numbers(threshold=delete_threshold)
+        logging.info("Deleção concluída com sucesso.")
 
-        # 9. GERAR RELATÓRIO PDF
-        generate_report(stats_before, expected_ratio=expected_ratio, tolerancia=tolerancia)
+        # 5. CONSULTA SQL (APÓS A EXCLUSÃO)
+        logging.info("Executando consultas SQL obrigatórias (após a exclusão)...")
+        stats_after = db.get_stats(candidate_id)
+        
+        print("\n" + "-"*20 + " RESULTADOS APÓS A EXCLUSÃO " + "-"*21)
+        # d) Listar a sequência Fibonacci novamente
+        print(f"\n[CONSULTA 4] Sequência Fibonacci remanescente (números <= {delete_threshold}):")
+        print(', '.join(map(str, stats_after['sequencia'])))
+        print("-" * 64 + "\n")
 
-        # 10. EXPORTAÇÃO OPCIONAL PARA JSON
-        if export_json:
-            export_stats_to_json(stats_before)
-
-        # CONCLUSÃO
-        logging.info("Processo concluído com sucesso!")
-        print("\nRelatório gerado: relatorio.pdf")
-        if export_json:
-            print("Dados exportados para: dados.json")
 
     except Exception as e:
-        logging.error(f"Erro fatal no processo: {e}")
+        logging.critical(f"Ocorreu um erro fatal durante a execução: {e}")
+
+    finally:
+        # 6. FINALIZAÇÃO E RELATÓRIOS
+        end_time = time.perf_counter()
+        duration = end_time - start_time
+
+        logging.info("=" * 50)
+        logging.info("PROCESSO FINALIZADO")
+        logging.info(f"Tempo de execução total: {duration:.4f} segundos.")
+        logging.info("=" * 50)
+
+        # Gera os relatórios com base nos dados de antes da exclusão, que são mais completos,
+        # mas adiciona o tempo total de execução de todo o processo.
+        if 'stats_before' in locals():
+            logging.info("Gerando relatório em PDF...")
+            generate_report(stats_before, 
+                            duration, 
+                            filename="relatorio.pdf",
+                            expected_ratio=expected_ratio, 
+                            tolerancia=tolerancia)
+
+            if export_json:
+                logging.info("Exportando dados para JSON...")
+                export_stats_to_json(stats_before, filename="dados_finais.json")
+        else:
+            logging.warning("Não foi possível gerar relatórios pois os dados iniciais não foram coletados.")
 
 def test_fibonacci_generation():
     """Testa a geração da sequência Fibonacci
